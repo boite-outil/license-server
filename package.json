@@ -1,0 +1,20 @@
+{
+  "name": "license-server",
+  "version": "1.0.0",
+  "description": "Serveur de validation de clés de licence pour application Android",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "generate-keys": "node scripts/generate-keys.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "better-sqlite3": "^11.3.0",
+    "dotenv": "^16.4.5",
+    "express-rate-limit": "^7.4.0",
+    "uuid": "^9.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

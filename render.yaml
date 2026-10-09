@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: license-server
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: ADMIN_SECRET
+        sync: false
+      - key: PORT
+        value: 10000
