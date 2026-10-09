@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../db/db');
+const { client } = require('../db/db');
 const { generateLicenseKey } = require('../utils/keygen');
 const adminAuth = require('../middleware/adminAuth');
 
@@ -13,60 +13,69 @@ router.use(adminAuth);
  * durationDays (optionnel) : nombre de jours de validité À PARTIR DE L'ACTIVATION
  * (pas de la génération). Omis ou 0/null = pas d'expiration.
  */
-router.post('/keys', (req, res) => {
-  const { appId, count = 1, note, durationDays } = req.body || {};
+router.post('/keys', async (req, res) => {
+  try {
+    const { appId, count = 1, note, durationDays } = req.body || {};
 
-  if (!appId) {
-    return res.status(400).json({ error: 'appId requis' });
-  }
-  const n = Math.min(Math.max(parseInt(count, 10) || 1, 1), 1000);
+    if (!appId) {
+      return res.status(400).json({ error: 'appId requis' });
+    }
+    const n = Math.min(Math.max(parseInt(count, 10) || 1, 1), 1000);
+    const days = durationDays ? Math.max(parseInt(durationDays, 10) || 0, 0) : 0;
 
-  const days = durationDays ? Math.max(parseInt(durationDays, 10) || 0, 0) : 0;
-  // On ne fixe pas expires_at ici : la durée part de l'activation, pas de la
-  // génération. On stocke juste la durée en jours dans `note` sous forme lisible
-  // si besoin, et on la passe via une colonne dédiée au moment de l'activation.
-  const insert = db.prepare(
-    'INSERT INTO licenses (license_key, app_id, note, duration_days) VALUES (?, ?, ?, ?)'
-  );
-
-  const keys = [];
-  const insertMany = db.transaction((howMany) => {
-    for (let i = 0; i < howMany; i++) {
+    const keys = [];
+    for (let i = 0; i < n; i++) {
       let key;
+      let exists = true;
       // évite les collisions, très improbable mais on se protège
       do {
         key = generateLicenseKey();
-      } while (db.prepare('SELECT 1 FROM licenses WHERE license_key = ?').get(key));
-      insert.run(key, appId, note || null, days || null);
+        const check = await client.execute({
+          sql: 'SELECT 1 FROM licenses WHERE license_key = ?',
+          args: [key],
+        });
+        exists = check.rows.length > 0;
+      } while (exists);
+
+      await client.execute({
+        sql: 'INSERT INTO licenses (license_key, app_id, note, duration_days) VALUES (?, ?, ?, ?)',
+        args: [key, appId, note || null, days || null],
+      });
       keys.push(key);
     }
-  });
 
-  insertMany(n);
-
-  res.json({ appId, count: n, durationDays: days || null, keys });
+    res.json({ appId, count: n, durationDays: days || null, keys });
+  } catch (err) {
+    console.error('Erreur POST /api/admin/keys:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
 });
 
 /**
  * GET /api/admin/keys?appId=...&status=...
  * Liste les clés (avec filtre optionnel).
  */
-router.get('/keys', (req, res) => {
-  const { appId, status } = req.query;
-  let query = 'SELECT * FROM licenses WHERE 1=1';
-  const params = [];
-  if (appId) {
-    query += ' AND app_id = ?';
-    params.push(appId);
-  }
-  if (status) {
-    query += ' AND status = ?';
-    params.push(status);
-  }
-  query += ' ORDER BY created_at DESC LIMIT 500';
+router.get('/keys', async (req, res) => {
+  try {
+    const { appId, status } = req.query;
+    let sql = 'SELECT * FROM licenses WHERE 1=1';
+    const args = [];
+    if (appId) {
+      sql += ' AND app_id = ?';
+      args.push(appId);
+    }
+    if (status) {
+      sql += ' AND status = ?';
+      args.push(status);
+    }
+    sql += ' ORDER BY created_at DESC LIMIT 500';
 
-  const rows = db.prepare(query).all(...params);
-  res.json({ licenses: rows });
+    const result = await client.execute({ sql, args });
+    res.json({ licenses: result.rows });
+  } catch (err) {
+    console.error('Erreur GET /api/admin/keys:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
+  }
 });
 
 /**
@@ -74,18 +83,24 @@ router.get('/keys', (req, res) => {
  * Révoque une clé (ex: remboursement, chargeback, abus détecté).
  * body: { key }
  */
-router.post('/revoke', (req, res) => {
-  const { key } = req.body || {};
-  if (!key) return res.status(400).json({ error: 'key requis' });
+router.post('/revoke', async (req, res) => {
+  try {
+    const { key } = req.body || {};
+    if (!key) return res.status(400).json({ error: 'key requis' });
 
-  const result = db
-    .prepare(`UPDATE licenses SET status = 'revoked' WHERE license_key = ?`)
-    .run(key.toUpperCase().trim());
+    const result = await client.execute({
+      sql: "UPDATE licenses SET status = 'revoked' WHERE license_key = ?",
+      args: [key.toUpperCase().trim()],
+    });
 
-  if (result.changes === 0) {
-    return res.status(404).json({ error: 'Clé introuvable' });
+    if (result.rowsAffected === 0) {
+      return res.status(404).json({ error: 'Clé introuvable' });
+    }
+    res.json({ revoked: true });
+  } catch (err) {
+    console.error('Erreur POST /api/admin/revoke:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
   }
-  res.json({ revoked: true });
 });
 
 /**
@@ -93,20 +108,24 @@ router.post('/revoke', (req, res) => {
  * Libère une clé de son appareil actuel (ex: l'utilisateur a changé de téléphone).
  * body: { key }
  */
-router.post('/reset-device', (req, res) => {
-  const { key } = req.body || {};
-  if (!key) return res.status(400).json({ error: 'key requis' });
+router.post('/reset-device', async (req, res) => {
+  try {
+    const { key } = req.body || {};
+    if (!key) return res.status(400).json({ error: 'key requis' });
 
-  const result = db
-    .prepare(
-      `UPDATE licenses SET device_id = NULL, status = 'unused' WHERE license_key = ?`
-    )
-    .run(key.toUpperCase().trim());
+    const result = await client.execute({
+      sql: "UPDATE licenses SET device_id = NULL, status = 'unused' WHERE license_key = ?",
+      args: [key.toUpperCase().trim()],
+    });
 
-  if (result.changes === 0) {
-    return res.status(404).json({ error: 'Clé introuvable' });
+    if (result.rowsAffected === 0) {
+      return res.status(404).json({ error: 'Clé introuvable' });
+    }
+    res.json({ reset: true });
+  } catch (err) {
+    console.error('Erreur POST /api/admin/reset-device:', err);
+    res.status(500).json({ error: 'SERVER_ERROR' });
   }
-  res.json({ reset: true });
 });
 
 module.exports = router;

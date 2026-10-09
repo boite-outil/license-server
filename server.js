@@ -2,6 +2,7 @@ require('dotenv').config();
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 
+const { init } = require('./db/db');
 const licenseRoutes = require('./routes/license');
 const adminRoutes = require('./routes/admin');
 
@@ -24,6 +25,14 @@ app.use('/api', publicLimiter, licenseRoutes);
 app.use('/api/admin', adminRoutes);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`License server démarré sur le port ${PORT}`);
-});
+
+init()
+  .then(() => {
+    app.listen(PORT, () => {
+      console.log(`License server démarré sur le port ${PORT}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Impossible d\'initialiser la base de données:', err);
+    process.exit(1);
+  });
