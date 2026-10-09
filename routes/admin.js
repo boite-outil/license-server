@@ -9,18 +9,24 @@ router.use(adminAuth);
 /**
  * POST /api/admin/keys
  * Génère N clés pour une app donnée.
- * body: { appId, count, note }
+ * body: { appId, count, note, durationDays }
+ * durationDays (optionnel) : nombre de jours de validité À PARTIR DE L'ACTIVATION
+ * (pas de la génération). Omis ou 0/null = pas d'expiration.
  */
 router.post('/keys', (req, res) => {
-  const { appId, count = 1, note } = req.body || {};
+  const { appId, count = 1, note, durationDays } = req.body || {};
 
   if (!appId) {
     return res.status(400).json({ error: 'appId requis' });
   }
   const n = Math.min(Math.max(parseInt(count, 10) || 1, 1), 1000);
 
+  const days = durationDays ? Math.max(parseInt(durationDays, 10) || 0, 0) : 0;
+  // On ne fixe pas expires_at ici : la durée part de l'activation, pas de la
+  // génération. On stocke juste la durée en jours dans `note` sous forme lisible
+  // si besoin, et on la passe via une colonne dédiée au moment de l'activation.
   const insert = db.prepare(
-    'INSERT INTO licenses (license_key, app_id, note) VALUES (?, ?, ?)'
+    'INSERT INTO licenses (license_key, app_id, note, duration_days) VALUES (?, ?, ?, ?)'
   );
 
   const keys = [];
@@ -31,14 +37,14 @@ router.post('/keys', (req, res) => {
       do {
         key = generateLicenseKey();
       } while (db.prepare('SELECT 1 FROM licenses WHERE license_key = ?').get(key));
-      insert.run(key, appId, note || null);
+      insert.run(key, appId, note || null, days || null);
       keys.push(key);
     }
   });
 
   insertMany(n);
 
-  res.json({ appId, count: n, keys });
+  res.json({ appId, count: n, durationDays: days || null, keys });
 });
 
 /**

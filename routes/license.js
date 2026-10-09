@@ -39,10 +39,22 @@ router.post('/activate', (req, res) => {
     return res.status(409).json({ valid: false, reason: 'KEY_ALREADY_USED' });
   }
 
-  // Première activation, ou réactivation sur le même appareil
+  // Clé déjà activée dans le passé et expirée depuis
+  if (license.expires_at && new Date(license.expires_at + 'Z') < new Date()) {
+    return res.status(403).json({ valid: false, reason: 'KEY_EXPIRED' });
+  }
+
+  // Première activation : si la clé a une durée, on fixe expires_at maintenant
+  const isFirstActivation = !license.activated_at;
+  const expiresAt =
+    isFirstActivation && license.duration_days
+      ? `datetime('now', '+${parseInt(license.duration_days, 10)} days')`
+      : 'expires_at';
+
   db.prepare(
     `UPDATE licenses
-     SET status = 'active', device_id = ?, activated_at = COALESCE(activated_at, datetime('now')), last_check_at = datetime('now')
+     SET status = 'active', device_id = ?, activated_at = COALESCE(activated_at, datetime('now')),
+         last_check_at = datetime('now'), expires_at = ${expiresAt}
      WHERE id = ?`
   ).run(deviceId, license.id);
 
@@ -80,6 +92,10 @@ router.post('/validate', (req, res) => {
   }
   if (license.status !== 'active' || license.device_id !== deviceId) {
     return res.status(403).json({ valid: false, reason: 'DEVICE_MISMATCH' });
+  }
+
+  if (license.expires_at && new Date(license.expires_at + 'Z') < new Date()) {
+    return res.status(403).json({ valid: false, reason: 'KEY_EXPIRED' });
   }
 
   db.prepare(`UPDATE licenses SET last_check_at = datetime('now') WHERE id = ?`).run(license.id);
