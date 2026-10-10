@@ -1,0 +1,349 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestion des licences</title>
+<style>
+  :root {
+    --bg: #101417;
+    --card: #1a1e22;
+    --card-border: #2a2f34;
+    --text: #e8ecef;
+    --muted: #9aa4ab;
+    --accent: #ff7a3d;
+    --accent-dark: #cc5a24;
+    --success: #4cd98a;
+    --error: #ff5c5c;
+    --input-bg: #0d1012;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 16px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 15px; margin: 0 0 12px; color: var(--accent); }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+    max-width: 900px;
+  }
+  label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; margin-top: 10px; }
+  input, select {
+    width: 100%;
+    background: var(--input-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 8px;
+    padding: 10px;
+    color: var(--text);
+    font-size: 14px;
+  }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 140px; }
+  button {
+    background: var(--accent);
+    color: #2a0e00;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-weight: bold;
+    font-size: 14px;
+    cursor: pointer;
+    margin-top: 14px;
+  }
+  button:hover { background: var(--accent-dark); color: #fff; }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--card-border);
+    color: var(--text);
+  }
+  button.small { padding: 6px 10px; font-size: 12px; margin-top: 0; }
+  .msg { margin-top: 10px; font-size: 13px; }
+  .msg.ok { color: var(--success); }
+  .msg.err { color: var(--error); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 10px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--card-border); }
+  th { color: var(--muted); font-weight: normal; }
+  .badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: bold;
+  }
+  .badge.unused { background: #2a2f34; color: var(--muted); }
+  .badge.active { background: rgba(76,217,138,0.15); color: var(--success); }
+  .badge.revoked { background: rgba(255,92,92,0.15); color: var(--error); }
+  .keys-list { font-family: monospace; font-size: 12px; white-space: pre-wrap; background: var(--input-bg); border-radius: 8px; padding: 10px; margin-top: 10px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filters { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 4px; }
+  .filters > div { flex: 1; }
+  .filters button { margin-top: 0; }
+  .lock-screen { max-width: 400px; margin: 60px auto; }
+</style>
+</head>
+<body>
+
+<div id="lockScreen" class="lock-screen card" style="display:none;">
+  <h1>Connexion admin</h1>
+  <div class="sub">Entre le secret admin (celui configuré dans Render en variable ADMIN_SECRET).</div>
+  <label>Secret admin</label>
+  <input type="password" id="secretInput" placeholder="••••••••">
+  <button onclick="saveSecret()">Se connecter</button>
+  <div id="lockMsg" class="msg"></div>
+</div>
+
+<div id="app" style="display:none;">
+  <h1>Gestion des licences</h1>
+  <div class="sub">Génère, consulte et révoque les clés — <a href="#" onclick="logout();return false;" style="color:var(--muted);">se déconnecter</a></div>
+
+  <div class="card">
+    <h2>Générer des clés</h2>
+    <div class="row">
+      <div>
+        <label>App ID</label>
+        <input id="genAppId" value="mgo.friendsgo.friendsbar">
+      </div>
+      <div>
+        <label>Nombre de clés</label>
+        <input id="genCount" type="number" value="1" min="1" max="1000">
+      </div>
+      <div>
+        <label>Durée (jours, 0 = illimité)</label>
+        <input id="genDuration" type="number" value="0" min="0">
+      </div>
+    </div>
+    <label>Note (optionnel)</label>
+    <input id="genNote" placeholder="ex: lot octobre">
+    <button onclick="generateKeys()">Générer</button>
+    <div id="genMsg" class="msg"></div>
+    <div id="genResult" class="keys-list" style="display:none;"></div>
+  </div>
+
+  <div class="card">
+    <h2>Clés existantes</h2>
+    <div class="filters">
+      <div>
+        <label>Filtrer par App ID</label>
+        <input id="filterAppId" value="mgo.friendsgo.friendsbar">
+      </div>
+      <div>
+        <label>Filtrer par statut</label>
+        <select id="filterStatus">
+          <option value="">Tous</option>
+          <option value="unused">Non utilisée</option>
+          <option value="active">Active</option>
+          <option value="revoked">Révoquée</option>
+        </select>
+      </div>
+      <button onclick="loadKeys()">Rafraîchir</button>
+    </div>
+    <div id="listMsg" class="msg"></div>
+    <table id="keysTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>Clé</th>
+          <th>Statut</th>
+          <th>Appareil</th>
+          <th>Créée le</th>
+          <th>Expire le</th>
+          <th>Note</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="keysBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const SECRET_KEY = 'license_admin_secret';
+
+function getSecret() {
+  try { return sessionStorage.getItem(SECRET_KEY) || ''; } catch (e) { return ''; }
+}
+function setSecret(v) {
+  try { sessionStorage.setItem(SECRET_KEY, v); } catch (e) {}
+}
+function clearSecret() {
+  try { sessionStorage.removeItem(SECRET_KEY); } catch (e) {}
+}
+
+function api(path, options) {
+  options = options || {};
+  options.headers = Object.assign({
+    'Content-Type': 'application/json',
+    'X-Admin-Secret': getSecret(),
+  }, options.headers || {});
+  return fetch(path, options).then(async (res) => {
+    let body = null;
+    try { body = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      const err = new Error((body && body.error) || ('Erreur ' + res.status));
+      err.status = res.status;
+      throw err;
+    }
+    return body;
+  });
+}
+
+function saveSecret() {
+  const v = document.getElementById('secretInput').value.trim();
+  if (!v) { return; }
+  setSecret(v);
+  verifyAndEnter();
+}
+
+function logout() {
+  clearSecret();
+  showLock();
+}
+
+function showLock(msg) {
+  document.getElementById('lockScreen').style.display = 'block';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('lockMsg').textContent = msg || '';
+  document.getElementById('lockMsg').className = 'msg err';
+}
+
+function showApp() {
+  document.getElementById('lockScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  loadKeys();
+}
+
+function verifyAndEnter() {
+  // On teste le secret avec un GET inoffensif.
+  api('/api/admin/keys?status=__ping__').then(() => {
+    showApp();
+  }).catch((e) => {
+    if (e.status === 401) {
+      showLock('Secret incorrect.');
+    } else {
+      // Si c'est une autre erreur (ex: réseau), on tente quand même d'entrer.
+      showApp();
+    }
+  });
+}
+
+function generateKeys() {
+  const appId = document.getElementById('genAppId').value.trim();
+  const count = parseInt(document.getElementById('genCount').value, 10) || 1;
+  const durationDays = parseInt(document.getElementById('genDuration').value, 10) || 0;
+  const note = document.getElementById('genNote').value.trim();
+
+  const msgEl = document.getElementById('genMsg');
+  const resultEl = document.getElementById('genResult');
+  msgEl.textContent = 'Génération en cours...';
+  msgEl.className = 'msg';
+  resultEl.style.display = 'none';
+
+  api('/api/admin/keys', {
+    method: 'POST',
+    body: JSON.stringify({ appId, count, durationDays: durationDays || undefined, note: note || undefined }),
+  }).then((data) => {
+    msgEl.textContent = data.count + ' clé(s) générée(s).';
+    msgEl.className = 'msg ok';
+    resultEl.style.display = 'block';
+    resultEl.textContent = data.keys.join('\n');
+    loadKeys();
+  }).catch((e) => {
+    msgEl.textContent = 'Erreur : ' + e.message;
+    msgEl.className = 'msg err';
+  });
+}
+
+function loadKeys() {
+  const appId = document.getElementById('filterAppId').value.trim();
+  const status = document.getElementById('filterStatus').value;
+  const msgEl = document.getElementById('listMsg');
+  const table = document.getElementById('keysTable');
+  const body = document.getElementById('keysBody');
+
+  msgEl.textContent = 'Chargement...';
+  msgEl.className = 'msg';
+
+  const params = new URLSearchParams();
+  if (appId) params.set('appId', appId);
+  if (status) params.set('status', status);
+
+  api('/api/admin/keys?' + params.toString()).then((data) => {
+    msgEl.textContent = data.licenses.length + ' clé(s).';
+    msgEl.className = 'msg ok';
+    body.innerHTML = '';
+    data.licenses.forEach((lic) => {
+      const tr = document.createElement('tr');
+      const device = lic.device_id ? lic.device_id.slice(0, 10) + '…' : '—';
+      const created = lic.created_at ? lic.created_at.replace('T', ' ').slice(0, 16) : '—';
+      const expires = lic.expires_at ? lic.expires_at.replace('T', ' ').slice(0, 16) : '—';
+      tr.innerHTML = `
+        <td style="font-family:monospace">${lic.license_key}</td>
+        <td><span class="badge ${lic.status}">${statusLabel(lic.status)}</span></td>
+        <td>${device}</td>
+        <td>${created}</td>
+        <td>${expires}</td>
+        <td>${lic.note || ''}</td>
+        <td class="actions"></td>
+      `;
+      const actionsTd = tr.querySelector('.actions');
+      if (lic.status !== 'revoked') {
+        const revokeBtn = document.createElement('button');
+        revokeBtn.className = 'small secondary';
+        revokeBtn.textContent = 'Révoquer';
+        revokeBtn.onclick = () => revokeKey(lic.license_key);
+        actionsTd.appendChild(revokeBtn);
+      }
+      if (lic.device_id) {
+        const resetBtn = document.createElement('button');
+        resetBtn.className = 'small secondary';
+        resetBtn.textContent = 'Libérer l\'appareil';
+        resetBtn.onclick = () => resetDevice(lic.license_key);
+        actionsTd.appendChild(resetBtn);
+      }
+      body.appendChild(tr);
+    });
+    table.style.display = data.licenses.length ? 'table' : 'none';
+  }).catch((e) => {
+    msgEl.textContent = 'Erreur : ' + e.message;
+    msgEl.className = 'msg err';
+  });
+}
+
+function statusLabel(s) {
+  if (s === 'unused') return 'Non utilisée';
+  if (s === 'active') return 'Active';
+  if (s === 'revoked') return 'Révoquée';
+  return s;
+}
+
+function revokeKey(key) {
+  if (!confirm('Révoquer la clé ' + key + ' ?')) return;
+  api('/api/admin/revoke', { method: 'POST', body: JSON.stringify({ key }) })
+    .then(() => loadKeys())
+    .catch((e) => alert('Erreur : ' + e.message));
+}
+
+function resetDevice(key) {
+  if (!confirm('Libérer l\'appareil lié à la clé ' + key + ' ?')) return;
+  api('/api/admin/reset-device', { method: 'POST', body: JSON.stringify({ key }) })
+    .then(() => loadKeys())
+    .catch((e) => alert('Erreur : ' + e.message));
+}
+
+// Démarrage
+if (getSecret()) {
+  verifyAndEnter();
+} else {
+  showLock();
+}
+</script>
+</body>
+</html>

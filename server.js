@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const path = require('path');
 const rateLimit = require('express-rate-limit');
 
 const { init } = require('./db/db');
@@ -8,6 +9,9 @@ const adminRoutes = require('./routes/admin');
 
 const app = express();
 app.use(express.json());
+
+// Page web (admin.html) pour générer/consulter/révoquer les clés sans Postman
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Limite les tentatives de brute-force sur les clés publiques
 const publicLimiter = rateLimit({
