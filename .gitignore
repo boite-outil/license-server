@@ -1,0 +1,11 @@
+node_modules/
+.env
+
+# Fichiers SQLite locaux (tests en local uniquement) - NE JAMAIS committer,
+# sinon ils écrasent/faussent la base réelle au prochain déploiement.
+db/licenses.db
+db/licenses.db-shm
+db/licenses.db-wal
+db/*.db
+db/*.db-shm
+db/*.db-wal
