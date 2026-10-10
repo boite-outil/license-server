@@ -110,7 +110,7 @@
     <div class="row">
       <div>
         <label>App ID</label>
-        <input id="genAppId" list="appIdList" value="com.barreamisgreg">
+        <input id="genAppId" value="mgo.friendsgo.friendsbar">
       </div>
       <div>
         <label>Nombre de clés</label>
@@ -118,4 +118,232 @@
       </div>
       <div>
         <label>Durée (jours, 0 = illimité)</label>
-        <input id="genDur
+        <input id="genDuration" type="number" value="0" min="0">
+      </div>
+    </div>
+    <label>Note (optionnel)</label>
+    <input id="genNote" placeholder="ex: lot octobre">
+    <button onclick="generateKeys()">Générer</button>
+    <div id="genMsg" class="msg"></div>
+    <div id="genResult" class="keys-list" style="display:none;"></div>
+  </div>
+
+  <div class="card">
+    <h2>Clés existantes</h2>
+    <div class="filters">
+      <div>
+        <label>Filtrer par App ID</label>
+        <input id="filterAppId" value="mgo.friendsgo.friendsbar">
+      </div>
+      <div>
+        <label>Filtrer par statut</label>
+        <select id="filterStatus">
+          <option value="">Tous</option>
+          <option value="unused">Non utilisée</option>
+          <option value="active">Active</option>
+          <option value="revoked">Révoquée</option>
+        </select>
+      </div>
+      <button onclick="loadKeys()">Rafraîchir</button>
+    </div>
+    <div id="listMsg" class="msg"></div>
+    <table id="keysTable" style="display:none;">
+      <thead>
+        <tr>
+          <th>Clé</th>
+          <th>Statut</th>
+          <th>Appareil</th>
+          <th>Créée le</th>
+          <th>Expire le</th>
+          <th>Note</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="keysBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const SECRET_KEY = 'license_admin_secret';
+
+function getSecret() {
+  try { return sessionStorage.getItem(SECRET_KEY) || ''; } catch (e) { return ''; }
+}
+function setSecret(v) {
+  try { sessionStorage.setItem(SECRET_KEY, v); } catch (e) {}
+}
+function clearSecret() {
+  try { sessionStorage.removeItem(SECRET_KEY); } catch (e) {}
+}
+
+function api(path, options) {
+  options = options || {};
+  options.headers = Object.assign({
+    'Content-Type': 'application/json',
+    'X-Admin-Secret': getSecret(),
+  }, options.headers || {});
+  return fetch(path, options).then(async (res) => {
+    let body = null;
+    try { body = await res.json(); } catch (e) {}
+    if (!res.ok) {
+      const err = new Error((body && body.error) || ('Erreur ' + res.status));
+      err.status = res.status;
+      throw err;
+    }
+    return body;
+  });
+}
+
+function saveSecret() {
+  const v = document.getElementById('secretInput').value.trim();
+  if (!v) { return; }
+  setSecret(v);
+  verifyAndEnter();
+}
+
+function logout() {
+  clearSecret();
+  showLock();
+}
+
+function showLock(msg) {
+  document.getElementById('lockScreen').style.display = 'block';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('lockMsg').textContent = msg || '';
+  document.getElementById('lockMsg').className = 'msg err';
+}
+
+function showApp() {
+  document.getElementById('lockScreen').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  loadKeys();
+}
+
+function verifyAndEnter() {
+  // On teste le secret avec un GET inoffensif.
+  api('/api/admin/keys?status=__ping__').then(() => {
+    showApp();
+  }).catch((e) => {
+    if (e.status === 401) {
+      showLock('Secret incorrect.');
+    } else {
+      // Si c'est une autre erreur (ex: réseau), on tente quand même d'entrer.
+      showApp();
+    }
+  });
+}
+
+function generateKeys() {
+  const appId = document.getElementById('genAppId').value.trim();
+  const count = parseInt(document.getElementById('genCount').value, 10) || 1;
+  const durationDays = parseInt(document.getElementById('genDuration').value, 10) || 0;
+  const note = document.getElementById('genNote').value.trim();
+
+  const msgEl = document.getElementById('genMsg');
+  const resultEl = document.getElementById('genResult');
+  msgEl.textContent = 'Génération en cours...';
+  msgEl.className = 'msg';
+  resultEl.style.display = 'none';
+
+  api('/api/admin/keys', {
+    method: 'POST',
+    body: JSON.stringify({ appId, count, durationDays: durationDays || undefined, note: note || undefined }),
+  }).then((data) => {
+    msgEl.textContent = data.count + ' clé(s) générée(s).';
+    msgEl.className = 'msg ok';
+    resultEl.style.display = 'block';
+    resultEl.textContent = data.keys.join('\n');
+    loadKeys();
+  }).catch((e) => {
+    msgEl.textContent = 'Erreur : ' + e.message;
+    msgEl.className = 'msg err';
+  });
+}
+
+function loadKeys() {
+  const appId = document.getElementById('filterAppId').value.trim();
+  const status = document.getElementById('filterStatus').value;
+  const msgEl = document.getElementById('listMsg');
+  const table = document.getElementById('keysTable');
+  const body = document.getElementById('keysBody');
+
+  msgEl.textContent = 'Chargement...';
+  msgEl.className = 'msg';
+
+  const params = new URLSearchParams();
+  if (appId) params.set('appId', appId);
+  if (status) params.set('status', status);
+
+  api('/api/admin/keys?' + params.toString()).then((data) => {
+    msgEl.textContent = data.licenses.length + ' clé(s).';
+    msgEl.className = 'msg ok';
+    body.innerHTML = '';
+    data.licenses.forEach((lic) => {
+      const tr = document.createElement('tr');
+      const device = lic.device_id ? lic.device_id.slice(0, 10) + '…' : '—';
+      const created = lic.created_at ? lic.created_at.replace('T', ' ').slice(0, 16) : '—';
+      const expires = lic.expires_at ? lic.expires_at.replace('T', ' ').slice(0, 16) : '—';
+      tr.innerHTML = `
+        <td style="font-family:monospace">${lic.license_key}</td>
+        <td><span class="badge ${lic.status}">${statusLabel(lic.status)}</span></td>
+        <td>${device}</td>
+        <td>${created}</td>
+        <td>${expires}</td>
+        <td>${lic.note || ''}</td>
+        <td class="actions"></td>
+      `;
+      const actionsTd = tr.querySelector('.actions');
+      if (lic.status !== 'revoked') {
+        const revokeBtn = document.createElement('button');
+        revokeBtn.className = 'small secondary';
+        revokeBtn.textContent = 'Révoquer';
+        revokeBtn.onclick = () => revokeKey(lic.license_key);
+        actionsTd.appendChild(revokeBtn);
+      }
+      if (lic.device_id) {
+        const resetBtn = document.createElement('button');
+        resetBtn.className = 'small secondary';
+        resetBtn.textContent = 'Libérer l\'appareil';
+        resetBtn.onclick = () => resetDevice(lic.license_key);
+        actionsTd.appendChild(resetBtn);
+      }
+      body.appendChild(tr);
+    });
+    table.style.display = data.licenses.length ? 'table' : 'none';
+  }).catch((e) => {
+    msgEl.textContent = 'Erreur : ' + e.message;
+    msgEl.className = 'msg err';
+  });
+}
+
+function statusLabel(s) {
+  if (s === 'unused') return 'Non utilisée';
+  if (s === 'active') return 'Active';
+  if (s === 'revoked') return 'Révoquée';
+  return s;
+}
+
+function revokeKey(key) {
+  if (!confirm('Révoquer la clé ' + key + ' ?')) return;
+  api('/api/admin/revoke', { method: 'POST', body: JSON.stringify({ key }) })
+    .then(() => loadKeys())
+    .catch((e) => alert('Erreur : ' + e.message));
+}
+
+function resetDevice(key) {
+  if (!confirm('Libérer l\'appareil lié à la clé ' + key + ' ?')) return;
+  api('/api/admin/reset-device', { method: 'POST', body: JSON.stringify({ key }) })
+    .then(() => loadKeys())
+    .catch((e) => alert('Erreur : ' + e.message));
+}
+
+// Démarrage
+if (getSecret()) {
+  verifyAndEnter();
+} else {
+  showLock();
+}
+</script>
+</body>
+</html>
