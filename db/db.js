@@ -3,11 +3,26 @@ const { createClient } = require('@libsql/client');
 // En production (Render), TURSO_DATABASE_URL et TURSO_AUTH_TOKEN sont lus
 // depuis les variables d'environnement (base Turso persistante, gratuite).
 // En local sans ces variables, on retombe sur un fichier SQLite local
-// (pratique pour développer/tester sans compte Turso).
+// (pratique pour développer/tester sans compte Turso, mais PAS persistant
+// sur Render : le disque du conteneur est recréé à chaque redéploiement
+// ou réveil du service, donc toute donnée écrite dans ce fichier local
+// est perdue dès que le service redémarre).
+const usingTurso = Boolean(process.env.TURSO_DATABASE_URL);
+
 const client = createClient({
   url: process.env.TURSO_DATABASE_URL || 'file:./db/licenses.db',
   authToken: process.env.TURSO_AUTH_TOKEN,
 });
+
+// Log de démarrage explicite : permet de vérifier dans les logs Render
+// quelle base est réellement utilisée, sans avoir à deviner.
+if (usingTurso) {
+  console.log('[DB] Connexion a Turso (base persistante) :', process.env.TURSO_DATABASE_URL);
+} else {
+  console.warn('[DB] ATTENTION : TURSO_DATABASE_URL absente -> utilisation du fichier SQLite local ./db/licenses.db');
+  console.warn('[DB] Sur Render (sans disque persistant), ce fichier est remis a zero a chaque redeploiement/reveil du service.');
+  console.warn('[DB] Verifie les variables d\'environnement TURSO_DATABASE_URL et TURSO_AUTH_TOKEN dans Render > Environment.');
+}
 
 async function init() {
   await client.execute(`
