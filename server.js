@@ -6,6 +6,7 @@ const rateLimit = require('express-rate-limit');
 const { init } = require('./db/db');
 const licenseRoutes = require('./routes/license');
 const adminRoutes = require('./routes/admin');
+const legacyRoutes = require('./routes/legacy');
 
 const app = express();
 app.use(express.json());
@@ -27,6 +28,9 @@ app.get('/', (req, res) => {
 
 app.use('/api', publicLimiter, licenseRoutes);
 app.use('/api/admin', adminRoutes);
+// Compat pour l'app KLEY (com.defmedia.invbar) : /activate, /verify,
+// /api/complete, /api/reset-device, /api/stats, /app/version.
+app.use('/', publicLimiter, legacyRoutes);
 
 const PORT = process.env.PORT || 3000;
 
